@@ -1079,7 +1079,7 @@ defineUnit("length", 0.0254, "in", "in inch inches")
 defineUnit("length", 0.3048, "ft", "ft foot feet")
 defineUnit("length", 0.9144, "yd", "yd yard yards")
 defineUnit("length", 1609.344, "mi", "mi mile miles")
-defineUnit("length", 1852, "nmi", "nmi nauticalmile nauticalmiles")
+defineUnit("length", 1852, "nmi", "nmi nm nauticalmile nauticalmiles")
 
 // Mass, against the kilogram.
 defineUnit("mass", 0.000001, "mg", "mg milligram milligrams")

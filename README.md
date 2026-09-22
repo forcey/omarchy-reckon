@@ -38,6 +38,7 @@ window. Web search goes to DuckDuckGo — change `webSearchTemplate` in
 | `1 tb to gib` | `931.323 GiB` |
 | `70 kg to lb` | `154.324 lb` |
 | `2 cup to ml` | `473.176 ml` |
+| `1 nm to km` | `1.852 km` |
 
 Length, mass, volume, temperature, data, speed, time and area. Data covers both
 the decimal (`kb mb gb tb`) and binary (`kib mib gib tib`) ladders, because the
