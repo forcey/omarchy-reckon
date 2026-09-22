@@ -122,8 +122,8 @@ Item {
   // Where a search that matched nothing gets offered. A template rather than a
   // base URL, so swapping engines stays one line however that engine spells
   // its parameters.
-  readonly property string webSearchTemplate: "https://duckduckgo.com/?q={query}"
-  readonly property string webSearchName: "DuckDuckGo"
+  readonly property string webSearchTemplate: "https://www.google.com/search?q={query}"
+  readonly property string webSearchName: "Google"
 
   // Bound to the central [menu] section in shell.toml via Color.qml.
   // Each color already includes its alpha companion (composed in the
