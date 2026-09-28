@@ -74,19 +74,36 @@ var MATH_FUNCTIONS = {
 // three take an angle, the last three give one back.
 var MATH_ANGLE_FUNCTIONS = { sin: "in", cos: "in", tan: "in", asin: "out", acos: "out", atan: "out" }
 
-// A function applied with angles in degrees or radians. Degrees go through
-// radians, which leaves the noise of pi not being exact: sin(180) would come
-// back as 1.2e-16 and tan(90) as sixteen quadrillion. A result that small is
-// zero, and tan at an odd multiple of 90 has no value at all.
+// Exact values on the quarter turns, indexed by how many quarter turns the
+// angle is: sin(pi), cos(90) and friends. tan has none at the odd ones.
+var MATH_QUARTER_TURNS = {
+  sin: [0, 1, 0, -1],
+  cos: [1, 0, -1, 0],
+  tan: [0, NaN, 0, NaN]
+}
+
+// A function applied with angles in degrees or radians. Neither pi nor its
+// fractions are exact in binary, so an angle on a quarter turn lands a hair
+// off it, and sin(pi) comes back as 1.2e-16 and tan(pi/2) as sixteen
+// quadrillion. An angle within that hair of a quarter turn is taken to be
+// on it, and answered from the table instead.
 function applyMathFunction(name, argument, degrees) {
   var direction = mathHas(MATH_ANGLE_FUNCTIONS, name) ? MATH_ANGLE_FUNCTIONS[name] : ""
-  if (!degrees || !direction) return MATH_FUNCTIONS[name](argument)
+  if (!direction) return MATH_FUNCTIONS[name](argument)
 
-  if (direction === "out") return MATH_FUNCTIONS[name](argument) * 180 / Math.PI
+  if (direction === "out") {
+    var angle = MATH_FUNCTIONS[name](argument)
+    return degrees ? angle * 180 / Math.PI : angle
+  }
 
-  if (name === "tan" && Math.abs(((argument % 180) + 180) % 180 - 90) < 1e-9) return NaN
-  var value = MATH_FUNCTIONS[name](argument * Math.PI / 180)
-  return Math.abs(value) < 1e-12 ? 0 : value
+  var turns = degrees ? argument / 90 : argument / (Math.PI / 2)
+  var nearest = Math.round(turns)
+  // Zero turns is left out: nothing near it is noise, since 0 * pi is exactly
+  // 0, and sin(1e-13) really is 1e-13.
+  if (nearest !== 0 && Math.abs(turns - nearest) < 1e-10 * Math.abs(turns))
+    return MATH_QUARTER_TURNS[name][((nearest % 4) + 4) % 4]
+
+  return MATH_FUNCTIONS[name](degrees ? argument * Math.PI / 180 : argument)
 }
 
 function mathHas(table, name) {
