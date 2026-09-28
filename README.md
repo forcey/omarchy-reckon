@@ -16,6 +16,17 @@ Forked from the answer engine of
 menu around it: it is its own overlay (`forcey.reckon`), so the stock Omarchy
 menu stays exactly as it is.
 
+## Requirements
+
+Omarchy with the Quickshell-based shell (Quattro). Everything else Reckon runs
+ships with Omarchy: `wl-clipboard` (copy and paste), `curl` (currency rates),
+`perl` (reading the rate cache), and `timedatectl` / `date` (time zones).
+
+The only network access is the currency rate fetch from
+[open.er-api.com](https://open.er-api.com), made the first time a currency
+conversion is typed and about once a day after that. Nothing else leaves the
+machine.
+
 ## Install
 
 ```bash
