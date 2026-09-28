@@ -1,13 +1,69 @@
 # Reckon
 
-A pop-up answer box for Omarchy. Press the hotkey, type a sum, a conversion or a
-small question, and the answer appears underneath. Enter (or a click) copies it
-to the clipboard and closes the box; Escape clears the query, then closes.
+A pop-up answer box for Omarchy. Press a hotkey (or click the calculator in the
+bar), type a sum, a conversion or a small question, and the answer appears
+underneath. Enter (or a click) copies it to the clipboard and closes the box;
+Escape clears the query, then closes.
 
 Forked from the answer engine of
 [dzhibas.menu](https://github.com/dzhibas/omarchy.dzhibas.menu), without the
 menu around it: it is its own overlay (`forcey.reckon`), so the stock Omarchy
 menu stays exactly as it is.
+
+## Install
+
+```bash
+omarchy plugin add https://github.com/forcey/omarchy-reckon --enable
+~/.config/omarchy/plugins/forcey.reckon/bind-hotkey
+```
+
+The first line clones the plugin, enables it, and puts a calculator button on
+the right of the bar. The second binds **Super + Alt + C** to open it. Omarchy
+plugins have no install hook, so the hotkey is this one extra command.
+
+### Hotkey
+
+`bind-hotkey` writes one marked block to `~/.config/hypr/bindings.lua` (after
+backing the file up) and reloads Hyprland. Running it again replaces the block
+rather than adding a second one.
+
+```bash
+cd ~/.config/omarchy/plugins/forcey.reckon
+./bind-hotkey                      # Super + Alt + C
+./bind-hotkey "SUPER + EQUAL"      # any other chord
+./bind-hotkey --force "SUPER + R"  # take a chord that is already bound
+./bind-hotkey --remove             # remove the hotkey
+```
+
+It refuses a chord that is already bound and says what it is bound to; `--force`
+unbinds the old action first. Prefer to do it by hand? Add this to
+`bindings.lua`:
+
+```lua
+o.bind("SUPER + ALT + C", "Reckon", "omarchy-shell shell toggle forcey.reckon")
+```
+
+### Bar button
+
+The button can be moved like any other widget, e.g.
+`omarchy bar move forcey.reckon --section left`. It stays on the bar while the
+plugin is enabled: removing it from the bar disables the whole plugin, hotkey
+included.
+
+### Opening it from scripts
+
+```bash
+omarchy-shell shell toggle forcey.reckon
+omarchy-shell shell summon forcey.reckon '{"query":"100 usd to eur"}'
+```
+
+### Update and remove
+
+```bash
+omarchy plugin update forcey.reckon
+~/.config/omarchy/plugins/forcey.reckon/bind-hotkey --remove
+omarchy plugin remove forcey.reckon
+```
 
 ## Features
 
@@ -105,22 +161,3 @@ Keywords: `uuid` `password` `sha256` `base64` `b64` `b64d` `unbase64`
 Random bytes come from `/dev/urandom`, not `Math.random`, so `password` is
 worth trusting. The answer holds still while you finish typing and is new the
 next time you open the box.
-
-
-## Install
-
-Link the checkout into the plugin directory and enable it:
-
-```bash
-ln -s ~/src/omarchy-calc ~/.config/omarchy/plugins/forcey.reckon
-omarchy plugin enable forcey.reckon
-```
-
-Then bind a key in `~/.config/hypr/bindings.lua`:
-
-```lua
-o.bind("SUPER + ALT + C", "Reckon", "omarchy-shell shell toggle forcey.reckon")
-```
-
-A starting query can be passed along:
-`omarchy-shell shell summon forcey.reckon '{"query":"100 usd to eur"}'`.

@@ -4,12 +4,21 @@
   "name": "Reckon",
   "version": "0.1.0",
   "author": "forcey",
-  "description": "A pop-up answer box: calculator, unit and currency conversion, time zones, and small dev utilities (uuid, password, sha256, base64, urlencode, epoch). Forked from dzhibas.menu.",
+  "description": "A pop-up answer box: calculator, unit and currency conversion, time zones, and small dev utilities (uuid, password, sha256, base64, urlencode, epoch). Opens from a bar button or a hotkey. Forked from dzhibas.menu.",
   "kinds": [
-    "overlay"
+    "overlay",
+    "bar-widget"
   ],
   "keepLoaded": true,
   "entryPoints": {
-    "overlay": "Reckon.qml"
+    "overlay": "Reckon.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Reckon",
+    "description": "Opens the Reckon answer box",
+    "category": "System",
+    "defaultSection": "right",
+    "allowMultiple": false
   }
 }
