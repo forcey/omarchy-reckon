@@ -1,26 +1,15 @@
 {
   "schemaVersion": 1,
-  "id": "dzhibas.menu",
-  "name": "Supercharged Omarchy menu",
-  "version": "1.3.4",
-  "author": "Nikolajus Krauklis",
-  "description": "Quickshell-powered Omarchy command menu supercharged with links/web search, unit conversion, time zones, dev utilities (uuid, password, sha256, base64, urlencode, epoch), process killing, a calculator, and currency conversion",
+  "id": "forcey.reckon",
+  "name": "Reckon",
+  "version": "0.1.0",
+  "author": "forcey",
+  "description": "A pop-up answer box: calculator, unit and currency conversion, time zones, and small dev utilities (uuid, password, sha256, base64, urlencode, epoch). Forked from dzhibas.menu.",
   "kinds": [
-    "menu",
-    "bar-widget"
+    "overlay"
   ],
   "keepLoaded": true,
   "entryPoints": {
-    "menu": "Menu.qml",
-    "barWidget": "BarWidget.qml"
-  },
-  "barWidget": {
-    "displayName": "Supercharged Omarchy menu",
-    "description": "Launches the Omarchy menu",
-    "category": "Compositor",
-    "allowMultiple": false
-  },
-  "omarchy": {
-    "clonedFrom": "omarchy.menu"
+    "overlay": "Reckon.qml"
   }
 }

@@ -1,32 +1,32 @@
-# Supercharged Omarchy Menu
+# Reckon
 
-A fork of the Omarchy command menu that answers questions instead of only
-finding commands.
+A pop-up answer box for Omarchy. Press the hotkey, type a sum, a conversion or a
+small question, and the answer appears underneath. Enter (or a click) copies it
+to the clipboard and closes the box; Escape clears the query, then closes.
 
-The stock menu is a launcher: you type, it filters, you pick. Everything below
-is what this fork adds on top — searches that come back with an **answer** at
-the head of the list. Enter copies it, or acts on it. Everything the stock menu
-does (apps, themes, system commands, all of `omarchy-menu.jsonc`) still works
-exactly as before.
+Forked from the answer engine of
+[dzhibas.menu](https://github.com/dzhibas/omarchy.dzhibas.menu), without the
+menu around it: it is its own overlay (`forcey.reckon`), so the stock Omarchy
+menu stays exactly as it is.
 
 ## Features
 
-### Open links and search the web
+### Calculator
 
 | Type | Get |
 | --- | --- |
-| `github.com/dzhibas` | Opens it in your browser |
-| `https://claude.ai/code` | Opens it |
-| `localhost:3000` | Opens it |
-| *anything with no matches* | **Search the web** — no more dead-end "No matches" |
+| `2+3` | `5` |
+| `sqrt(144)+2^8` | `268` |
+| `(1920*1080)/2` | `1036800` |
 
-<img width="610" height="278" alt="image" src="https://github.com/user-attachments/assets/0337630e-cdc9-4c18-92b7-da767598ead9" />
+Operators `+ - * / % ^`, parentheses, unary signs, the constants `pi` `tau` `e`,
+and the functions `sqrt cbrt abs round floor ceil exp ln log log2 sin cos tan
+asin acos atan`.
 
-Bare domains are recognised only for known top-level domains, so `MenuModel.js`
-and `install.sh` stay ordinary searches. Links open with
-`omarchy-launch-browser`, which resolves your default browser and focuses the
-window. Web search goes to DuckDuckGo — change `webSearchTemplate` in
-`Menu.qml` for anything else.
+The expression is parsed by hand rather than handed to the JavaScript engine
+that runs your shell — nothing typed into the search field is ever evaluated as
+code. A bare number stays a search term.
+
 
 ### Unit conversion
 
@@ -45,7 +45,32 @@ the decimal (`kb mb gb tb`) and binary (`kib mib gib tib`) ladders, because the
 difference between them is most of why anyone asks. Units take their full names
 too — `miles`, `pounds`, `celsius`, `kilometres`. No network, no cache.
 
-<img width="612" height="282" alt="image" src="https://github.com/user-attachments/assets/f60d7032-64c6-4937-9747-5b89fad21d59" />
+
+### Currency conversion
+
+| Type | Get |
+| --- | --- |
+| `123 eur to usd` | `143.31 USD` · `123 EUR at 1.1651 · 28 Aug` |
+| `123USD to eur` | `105.57 EUR` |
+| `$120 to eur` | `102.99 EUR` |
+| `50 euros to dollars` | `58.26 USD` |
+| `(20+5) eur to usd` | `29.13 USD` |
+| `eur to usd` | Today's rate for one unit |
+
+
+166 currencies, any pair. Codes, symbols (`$ € £ ¥ ₹ ₽ ₴ zł`) and names all
+work, and the amount can be any expression the calculator understands.
+
+Rates come from [exchangerate-api's free daily
+endpoint](https://open.er-api.com/v6/latest/EUR) — no API key — and are cached
+at `~/.cache/omarchy/reckon-exchange-rates.json`. **The fetch happens the first
+time you actually type a conversion**, so a box never used as a converter
+never touches the network; after that it refreshes about once a day. Offline,
+the row says so rather than showing a stale number without warning.
+
+Commas are not accepted in amounts: `1,000` means one thousand in half of
+Europe and one-point-nought in the other half, and neither reading is worth
+guessing at. Crypto is not supported — the rate source is fiat only.
 
 ### Time zones
 
@@ -59,7 +84,6 @@ Any city the system knows — the zone list comes from `timedatectl` — plus th
 usual abbreviations (`utc`, `cet`, `est`, `pst`, `ist`, `jst`, `aest`). The day
 is shown alongside the time when it isn't today's.
 
-<img width="616" height="281" alt="image" src="https://github.com/user-attachments/assets/29ff9d9f-d45c-40e3-9924-8f449788ea0f" />
 
 ### Developer utilities
 
@@ -80,69 +104,23 @@ Keywords: `uuid` `password` `sha256` `base64` `b64` `b64d` `unbase64`
 
 Random bytes come from `/dev/urandom`, not `Math.random`, so `password` is
 worth trusting. The answer holds still while you finish typing and is new the
-next time you open the menu.
+next time you open the box.
 
-<img width="607" height="654" alt="image" src="https://github.com/user-attachments/assets/78eb2f0b-4b61-48d3-9a3b-1ae759c5ac09" />
-
-
-### Kill a process
-
-| Type | Get |
-| --- | --- |
-| `kill chromium` | The matching processes, with pid, CPU and memory |
-
-Enter sends `SIGTERM`. Nothing runs `ps` until `kill` is typed, and the listing
-is reused for a few seconds rather than re-run on every keystroke.
-
-<img width="612" height="285" alt="image" src="https://github.com/user-attachments/assets/9d0e490d-c74d-466c-82a9-f0d05adf9f27" />
-
-### Calculator
-
-| Type | Get |
-| --- | --- |
-| `2+3` | `5` |
-| `sqrt(144)+2^8` | `268` |
-| `(1920*1080)/2` | `1036800` |
-
-Operators `+ - * / % ^`, parentheses, unary signs, the constants `pi` `tau` `e`,
-and the functions `sqrt cbrt abs round floor ceil exp ln log log2 sin cos tan
-asin acos atan`.
-
-The expression is parsed by hand rather than handed to the JavaScript engine
-that runs your shell — nothing typed into the search field is ever evaluated as
-code. A bare number stays a search term.
-
-<img width="620" height="270" alt="image" src="https://github.com/user-attachments/assets/6105d637-7315-492e-b1c2-05b2fa274d4a" />
-
-### Currency conversion
-
-| Type | Get |
-| --- | --- |
-| `123 eur to usd` | `143.31 USD` · `123 EUR at 1.1651 · 28 Aug` |
-| `123USD to eur` | `105.57 EUR` |
-| `$120 to eur` | `102.99 EUR` |
-| `50 euros to dollars` | `58.26 USD` |
-| `(20+5) eur to usd` | `29.13 USD` |
-| `eur to usd` | Today's rate for one unit |
-
-<img width="611" height="268" alt="image" src="https://github.com/user-attachments/assets/df5c3676-fd7e-4ed7-8e86-781193adb4ca" />
-
-166 currencies, any pair. Codes, symbols (`$ € £ ¥ ₹ ₽ ₴ zł`) and names all
-work, and the amount can be any expression the calculator understands.
-
-Rates come from [exchangerate-api's free daily
-endpoint](https://open.er-api.com/v6/latest/EUR) — no API key — and are cached
-at `~/.cache/omarchy/menu-exchange-rates.json`. **The fetch happens the first
-time you actually type a conversion**, so a menu never used as a converter
-never touches the network; after that it refreshes about once a day. Offline,
-the row says so rather than showing a stale number without warning.
-
-Commas are not accepted in amounts: `1,000` means one thousand in half of
-Europe and one-point-nought in the other half, and neither reading is worth
-guessing at. Crypto is not supported — the rate source is fiat only.
 
 ## Install
 
+Link the checkout into the plugin directory and enable it:
+
 ```bash
-omarchy plugin install https://github.com/dzhibas/omarchy.dzhibas.menu
-omarchy restart shell
+ln -s ~/src/omarchy-calc ~/.config/omarchy/plugins/forcey.reckon
+omarchy plugin enable forcey.reckon
+```
+
+Then bind a key in `~/.config/hypr/bindings.lua`:
+
+```lua
+o.bind("SUPER + ALT + C", "Reckon", "omarchy-shell shell toggle forcey.reckon")
+```
+
+A starting query can be passed along:
+`omarchy-shell shell summon forcey.reckon '{"query":"100 usd to eur"}'`.
