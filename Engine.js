@@ -38,6 +38,301 @@ function sanitizeRow(row) {
   return row
 }
 
+// --- Exact decimals ----------------------------------------------------------
+// Binary floating point cannot hold 0.1, so 0.1 + 0.2 - 0.3 comes out as
+// 5.55e-17 and 2^64 loses its last digits. Arithmetic on typed numbers is
+// done here instead, in decimal, exactly: sums, products and whole powers are
+// exact outright, and a quotient is exact when it terminates and carried to
+// DECIMAL_WORK_DIGITS when it does not. The float answer is kept alongside
+// and used whenever a step falls outside this -- a function, pi, a fractional
+// power, a number too big to be worth writing out.
+//
+// The engine QML runs has no BigInt, so the integers under the decimals are
+// arrays of base-10^7 limbs, least significant first, with no leading zero
+// limbs; [] is zero. A limb product stays under 2^53.
+
+var NAT_BASE = 10000000
+var NAT_LIMB_DIGITS = 7
+
+// Significant digits a quotient that does not terminate is carried to, how
+// many an exact result may grow to before it is rounded to that, and how many
+// an inexact one is shown with.
+var DECIMAL_WORK_DIGITS = 50
+var DECIMAL_EXACT_DIGITS = 60
+var DECIMAL_SHOWN_DIGITS = 20
+// An exact answer is written out in full up to this many significant digits.
+var DECIMAL_EXACT_SHOWN_DIGITS = 30
+// Beyond these, a number is written in exponent form by the float formatter:
+// no one reads 22 digits before the point as a number.
+var DECIMAL_MAX_INTEGER_DIGITS = 21
+var DECIMAL_MIN_MAGNITUDE = -6
+// Aligning 1e300 with 1e-300 would build a 600-digit integer to add them.
+var DECIMAL_MAX_ALIGN = 200
+
+function natTrim(a) {
+  while (a.length > 0 && a[a.length - 1] === 0) a.pop()
+  return a
+}
+
+function natFromDigits(text) {
+  var limbs = []
+  for (var end = text.length; end > 0; end -= NAT_LIMB_DIGITS)
+    limbs.push(parseInt(text.slice(Math.max(0, end - NAT_LIMB_DIGITS), end), 10))
+  return natTrim(limbs)
+}
+
+function natToDigits(a) {
+  if (a.length === 0) return "0"
+  var out = String(a[a.length - 1])
+  for (var i = a.length - 2; i >= 0; i--) {
+    var limb = String(a[i])
+    out += "0000000".slice(limb.length) + limb
+  }
+  return out
+}
+
+function natCompare(a, b) {
+  if (a.length !== b.length) return a.length < b.length ? -1 : 1
+  for (var i = a.length - 1; i >= 0; i--)
+    if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1
+  return 0
+}
+
+function natAdd(a, b) {
+  var out = []
+  var carry = 0
+  for (var i = 0; i < a.length || i < b.length || carry; i++) {
+    var sum = (a[i] || 0) + (b[i] || 0) + carry
+    carry = sum >= NAT_BASE ? 1 : 0
+    out.push(sum - carry * NAT_BASE)
+  }
+  return natTrim(out)
+}
+
+// a - b, for a >= b.
+function natSub(a, b) {
+  var out = []
+  var borrow = 0
+  for (var i = 0; i < a.length; i++) {
+    var diff = a[i] - (b[i] || 0) - borrow
+    borrow = diff < 0 ? 1 : 0
+    out.push(diff + borrow * NAT_BASE)
+  }
+  return natTrim(out)
+}
+
+// a * m, for 0 <= m < NAT_BASE.
+function natMulSmall(a, m) {
+  if (m === 0 || a.length === 0) return []
+  var out = []
+  var carry = 0
+  for (var i = 0; i < a.length || carry; i++) {
+    var product = (a[i] || 0) * m + carry
+    carry = Math.floor(product / NAT_BASE)
+    out.push(product - carry * NAT_BASE)
+  }
+  return natTrim(out)
+}
+
+function natMul(a, b) {
+  if (a.length === 0 || b.length === 0) return []
+  var out = []
+  for (var k = 0; k < a.length + b.length; k++) out.push(0)
+  for (var i = 0; i < a.length; i++) {
+    var carry = 0
+    for (var j = 0; j < b.length; j++) {
+      var current = out[i + j] + a[i] * b[j] + carry
+      carry = Math.floor(current / NAT_BASE)
+      out[i + j] = current - carry * NAT_BASE
+    }
+    for (var at = i + b.length; carry; at++) {
+      var rest = out[at] + carry
+      carry = Math.floor(rest / NAT_BASE)
+      out[at] = rest - carry * NAT_BASE
+    }
+  }
+  return natTrim(out)
+}
+
+// a * 10^k: whole limbs by shifting, the rest by a small multiply.
+function natShift(a, k) {
+  if (a.length === 0 || k === 0) return a.slice()
+  var out = a.slice()
+  for (var whole = Math.floor(k / NAT_LIMB_DIGITS); whole > 0; whole--) out.unshift(0)
+  var part = k % NAT_LIMB_DIGITS
+  return part ? natMulSmall(out, Math.pow(10, part)) : out
+}
+
+function natToNumber(a) {
+  var value = 0
+  for (var i = a.length - 1; i >= 0; i--) value = value * NAT_BASE + a[i]
+  return value
+}
+
+// Schoolbook long division, one decimal digit of quotient at a time. The
+// digit is guessed from the leading figures as floats, which can be one out
+// either way, and the guess is corrected against the exact remainder.
+function natDivmod(a, b) {
+  var digits = natToDigits(a)
+  var divisor = natToNumber(b)
+  var quotient = ""
+  var remainder = []
+
+  for (var i = 0; i < digits.length; i++) {
+    remainder = natAdd(natMulSmall(remainder, 10), natFromDigits(digits.charAt(i)))
+    var digit = Math.min(9, Math.max(0, Math.floor(natToNumber(remainder) / divisor)))
+    var taken = natMulSmall(b, digit)
+    while (digit > 0 && natCompare(taken, remainder) > 0) { digit -= 1; taken = natSub(taken, b) }
+    remainder = natSub(remainder, taken)
+    while (natCompare(remainder, b) >= 0) { remainder = natSub(remainder, b); digit += 1 }
+    quotient += digit
+  }
+
+  return { quotient: natFromDigits(quotient), remainder: remainder }
+}
+
+// A decimal is (-1)^negative * mantissa * 10^exponent, kept with no trailing
+// zeros in the mantissa so equal values look equal. `inexact` marks one that
+// was rounded on the way, which is shown to fewer digits.
+function decimalOf(negative, mantissa, exponent, inexact) {
+  if (mantissa.length === 0) return { negative: false, mantissa: [], exponent: 0, inexact: !!inexact }
+  var digits = natToDigits(mantissa)
+  var zeros = digits.length - digits.replace(/0+$/, "").length
+  if (zeros > 0) {
+    mantissa = natFromDigits(digits.slice(0, digits.length - zeros))
+    exponent += zeros
+  }
+  return { negative: negative, mantissa: mantissa, exponent: exponent, inexact: !!inexact }
+}
+
+// Rounds to `places` significant digits, half away from zero.
+function decimalRound(value, places) {
+  var digits = natToDigits(value.mantissa)
+  if (value.mantissa.length === 0 || digits.length <= places) return value
+  var kept = natFromDigits(digits.slice(0, places))
+  if (digits.charAt(places) >= "5") kept = natAdd(kept, [1])
+  return decimalOf(value.negative, kept, value.exponent + digits.length - places, true)
+}
+
+// An exact result that has grown past DECIMAL_EXACT_DIGITS is rounded to the
+// working precision, so a long chain of arithmetic stays cheap.
+function decimalLimit(value) {
+  if (natToDigits(value.mantissa).length <= DECIMAL_EXACT_DIGITS) return value
+  return decimalRound(value, DECIMAL_WORK_DIGITS)
+}
+
+// A number as the tokenizer read it -- "12", "0.5", ".5", "1e3" -- or null.
+function decimalParse(text) {
+  var match = String(text).match(/^(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/)
+  if (!match) return null
+  var whole = match[1] || ""
+  var fraction = match[2] || ""
+  var power = match[3] ? parseInt(match[3], 10) : 0
+  if (Math.abs(power) > 1000) return null
+  return decimalLimit(decimalOf(false, natFromDigits((whole + fraction) || "0"), power - fraction.length, false))
+}
+
+function decimalIsZero(value) {
+  return value.mantissa.length === 0
+}
+
+function decimalNegate(value) {
+  if (decimalIsZero(value)) return value
+  return { negative: !value.negative, mantissa: value.mantissa, exponent: value.exponent, inexact: value.inexact }
+}
+
+// Both mantissas brought to the smaller exponent, or null when that would
+// take an absurd number of digits.
+function decimalAlign(a, b) {
+  var exponent = Math.min(a.exponent, b.exponent)
+  if (Math.max(a.exponent, b.exponent) - exponent > DECIMAL_MAX_ALIGN) return null
+  return {
+    a: natShift(a.mantissa, a.exponent - exponent),
+    b: natShift(b.mantissa, b.exponent - exponent),
+    exponent: exponent
+  }
+}
+
+function decimalAdd(a, b) {
+  var aligned = decimalAlign(a, b)
+  if (!aligned) return null
+  var inexact = a.inexact || b.inexact
+  if (a.negative === b.negative)
+    return decimalLimit(decimalOf(a.negative, natAdd(aligned.a, aligned.b), aligned.exponent, inexact))
+  var order = natCompare(aligned.a, aligned.b)
+  if (order === 0) return decimalOf(false, [], 0, inexact)
+  return order > 0
+    ? decimalLimit(decimalOf(a.negative, natSub(aligned.a, aligned.b), aligned.exponent, inexact))
+    : decimalLimit(decimalOf(b.negative, natSub(aligned.b, aligned.a), aligned.exponent, inexact))
+}
+
+function decimalMul(a, b) {
+  return decimalLimit(decimalOf(a.negative !== b.negative, natMul(a.mantissa, b.mantissa),
+                                a.exponent + b.exponent, a.inexact || b.inexact))
+}
+
+// Carried to DECIMAL_WORK_DIGITS significant digits, and exact when the
+// division comes out even before that.
+function decimalDiv(a, b) {
+  if (decimalIsZero(b)) return null
+  var aDigits = natToDigits(a.mantissa).length
+  var bDigits = natToDigits(b.mantissa).length
+  var scale = Math.max(0, DECIMAL_WORK_DIGITS + bDigits - aDigits + 1)
+  var divided = natDivmod(natShift(a.mantissa, scale), b.mantissa)
+  var inexact = a.inexact || b.inexact || divided.remainder.length > 0
+  return decimalLimit(decimalOf(a.negative !== b.negative, divided.quotient,
+                                a.exponent - b.exponent - scale, inexact))
+}
+
+// The remainder the way JavaScript's % gives it: the sign of the dividend,
+// after taking out as many whole divisors as fit.
+function decimalMod(a, b) {
+  if (decimalIsZero(b)) return null
+  var aligned = decimalAlign(a, b)
+  if (!aligned) return null
+  var remainder = natDivmod(aligned.a, aligned.b).remainder
+  return decimalOf(a.negative, remainder, aligned.exponent, a.inexact || b.inexact)
+}
+
+// A whole power, by repeated squaring. A result that would run to hundreds of
+// digits is left to floating point: that is the 2^1000 kind of question.
+function decimalPow(base, exponent) {
+  if (exponent.inexact || exponent.exponent < 0) return null
+  var power = parseInt(natToDigits(exponent.mantissa) + "000000000".slice(0, exponent.exponent), 10)
+  if (exponent.exponent > 9 || !(power <= 100000)) return null
+  if (natToDigits(base.mantissa).length * power > 400) return null
+  if (decimalIsZero(base) && exponent.negative && power > 0) return null
+
+  var result = decimalOf(false, [1], 0, false)
+  var square = base
+  for (var remaining = power; remaining > 0; remaining = Math.floor(remaining / 2)) {
+    if (remaining % 2 === 1) result = decimalMul(result, square)
+    if (remaining > 1) square = decimalMul(square, square)
+  }
+  return exponent.negative ? decimalDiv(decimalOf(false, [1], 0, false), result) : result
+}
+
+// Written out as a plain decimal, or "" for a value the float formatter
+// should write instead -- too large or too small to read without an exponent.
+function decimalFormat(value) {
+  if (decimalIsZero(value)) return "0"
+
+  var shownDigits = value.inexact ? DECIMAL_SHOWN_DIGITS : DECIMAL_EXACT_SHOWN_DIGITS
+  var shown = natToDigits(value.mantissa).length > shownDigits
+    ? decimalRound(value, DECIMAL_SHOWN_DIGITS)
+    : value
+  var digits = natToDigits(shown.mantissa)
+  var exponent = shown.exponent
+  var point = digits.length + exponent
+  if (point > DECIMAL_MAX_INTEGER_DIGITS || point < DECIMAL_MIN_MAGNITUDE) return ""
+
+  var text
+  if (exponent >= 0) text = digits + new Array(exponent + 1).join("0")
+  else if (point > 0) text = digits.slice(0, point) + "." + digits.slice(point)
+  else text = "0." + new Array(1 - point).join("0") + digits
+  return (shown.negative ? "-" : "") + text
+}
+
 // --- Calculator -------------------------------------------------------------
 // A search that reads as arithmetic ("2+3", "3.23 + 343", "(4+6)/2") answers
 // itself, so the menu doubles as a pocket calculator. The expression is parsed
@@ -164,7 +459,7 @@ function tokenizeMath(text) {
         while (i < src.length && /[0-9]/.test(src.charAt(i))) { number += src.charAt(i); i += 1 }
       }
       if (!/^(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(number)) return null
-      tokens.push({ type: "number", value: parseFloat(number) })
+      tokens.push({ type: "number", value: parseFloat(number), text: number })
       continue
     }
 
@@ -189,6 +484,11 @@ function tokenizeMath(text) {
 // search term instead of turning into a result row for itself.
 // `degrees` measures angles in degrees rather than radians, and `angles` in
 // the result says whether anything in the expression cared which.
+//
+// Every value is carried twice: `f`, the float, and `d`, the exact decimal
+// (see above) for as long as every step so far has had one. The first step
+// without one -- a function, a constant, a fractional power -- drops `d` for
+// everything built on it.
 function parseMathTokens(tokens, degrees) {
   var pos = 0
   var operators = 0
@@ -203,6 +503,10 @@ function parseMathTokens(tokens, degrees) {
     return token
   }
 
+  function exact(left, right, operation) {
+    return left.d && right.d ? operation(left.d, right.d) : null
+  }
+
   function parseExpression() {
     var left = parseTerm()
     if (left === null) return null
@@ -214,7 +518,9 @@ function parseMathTokens(tokens, degrees) {
       operators += 1
       var right = parseTerm()
       if (right === null) return null
-      left = token.type === "+" ? left + right : left - right
+      left = token.type === "+"
+        ? { f: left.f + right.f, d: exact(left, right, decimalAdd) }
+        : { f: left.f - right.f, d: exact(left, right, function(a, b) { return decimalAdd(a, decimalNegate(b)) }) }
     }
   }
 
@@ -229,9 +535,9 @@ function parseMathTokens(tokens, degrees) {
       operators += 1
       var right = parseUnary()
       if (right === null) return null
-      if (token.type === "*") left = left * right
-      else if (token.type === "/") left = left / right
-      else left = left % right
+      if (token.type === "*") left = { f: left.f * right.f, d: exact(left, right, decimalMul) }
+      else if (token.type === "/") left = { f: left.f / right.f, d: exact(left, right, decimalDiv) }
+      else left = { f: left.f % right.f, d: exact(left, right, decimalMod) }
     }
   }
 
@@ -241,7 +547,8 @@ function parseMathTokens(tokens, degrees) {
       pos += 1
       var operand = parseUnary()
       if (operand === null) return null
-      return token.type === "-" ? -operand : operand
+      if (token.type === "+") return operand
+      return { f: -operand.f, d: operand.d ? decimalNegate(operand.d) : null }
     }
     return parsePower()
   }
@@ -255,7 +562,7 @@ function parseMathTokens(tokens, degrees) {
     operators += 1
     var exponent = parseUnary()
     if (exponent === null) return null
-    return Math.pow(base, exponent)
+    return { f: Math.pow(base.f, exponent.f), d: exact(base, exponent, decimalPow) }
   }
 
   function parseAtom() {
@@ -266,23 +573,23 @@ function parseMathTokens(tokens, degrees) {
     }
 
     var number = eat("number")
-    if (number) return number.value
+    if (number) return { f: number.value, d: decimalParse(number.text) }
 
     var name = eat("name")
     if (!name) return null
-    if (mathHas(MATH_CONSTANTS, name.value)) return MATH_CONSTANTS[name.value]
+    if (mathHas(MATH_CONSTANTS, name.value)) return { f: MATH_CONSTANTS[name.value], d: null }
     if (!mathHas(MATH_FUNCTIONS, name.value)) return null
     if (!eat("(")) return null
     var argument = parseExpression()
     if (argument === null || !eat(")")) return null
     operators += 1
     if (mathHas(MATH_ANGLE_FUNCTIONS, name.value)) angles = true
-    return applyMathFunction(name.value, argument, degrees === true)
+    return { f: applyMathFunction(name.value, argument.f, degrees === true), d: null }
   }
 
   var value = parseExpression()
   if (value === null || pos !== tokens.length) return null
-  return { value: value, operators: operators, angles: angles }
+  return { value: value.f, exact: value.d, operators: operators, angles: angles }
 }
 
 // Binary floating point leaves 0.1 + 0.2 at 0.30000000000000004. Twelve
@@ -318,10 +625,13 @@ function evaluateMathIn(query, degrees) {
 
   var parsed = parseMathTokens(tokens, degrees)
   if (!parsed || parsed.operators === 0) return null
-  // Division by zero and the like: an answer the row cannot honestly show.
-  if (!isFinite(parsed.value)) return { text: "", angles: parsed.angles }
 
-  var result = formatMathResult(parsed.value)
+  // The exact answer where there is one; the float where there is not, or
+  // where the number is too big or small to write out.
+  var result = parsed.exact ? decimalFormat(parsed.exact) : ""
+  // Division by zero and the like: an answer the row cannot honestly show.
+  if (!result && !isFinite(parsed.value)) return { text: "", angles: parsed.angles }
+  if (!result) result = formatMathResult(parsed.value)
   if (tokens.grouped || tokens.symbol) result = groupThousands(result)
   if (tokens.symbol) result = formatMoney(result, tokens.symbol)
   return { text: result, angles: parsed.angles }

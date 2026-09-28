@@ -70,6 +70,9 @@ Remove the `o.bind` line from `bindings.lua` too.
 | `2+3` | `5` |
 | `sqrt(144)+2^8` | `268` |
 | `(1920*1080)/2` | `1036800` |
+| `0.1+0.2-0.3` | `0` |
+| `1/3` | `0.33333333333333333333` |
+| `2^64` | `18446744073709551616` |
 | `$10.10 + $0.40` | `$10.50` |
 | `sin(30)` | `0.5` (degrees) and `-0.988031624093` (radians) |
 | `asin(0.5)` | `30` (degrees) and `0.523598775598` (radians) |
@@ -90,6 +93,15 @@ left out.
 Operators `+ - * / % ^`, parentheses, unary signs, the constants `pi` `tau` `e`,
 and the functions `sqrt cbrt abs round floor ceil exp ln log log2 sin cos tan
 asin acos atan`.
+
+Arithmetic is exact. Sums, products, remainders and whole powers of typed
+numbers are worked out in decimal rather than binary floating point, so
+`0.1+0.2` is `0.3` and `2^64` keeps every digit. A quotient that terminates is
+exact too; one that repeats is carried to 50 digits and shown to 20, which is
+why `1/3*3` is `1`. Floating point (12 significant digits) takes over only
+where it has to: functions like `sqrt` and `sin`, the constants `pi` and `e`,
+fractional powers, and answers too large or small to write out
+(`2^100` is `1.26765060023e+30`).
 
 The expression is parsed by hand rather than handed to the JavaScript engine
 that runs your shell — nothing typed into the search field is ever evaluated as
