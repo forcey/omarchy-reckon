@@ -960,7 +960,7 @@ function epochMilliseconds(argument) {
 }
 
 // --- Time zones --------------------------------------------------------------
-// "time in tokyo". The engine QML runs has no Intl -- `toLocaleString` takes a
+// "time in tokyo", or just "tokyo" or "utc"; and "2pm est to utc". The engine QML runs has no Intl -- `toLocaleString` takes a
 // timeZone option and quietly ignores it -- so the zone database is the
 // system's own: the list of zones comes from timedatectl and each zone's
 // current offset from `date`, both cached, and the clock arithmetic is done
@@ -997,7 +997,11 @@ function zoneCityName(zone) {
 // Best zone for what was typed, or "" for a place the system has never heard
 // of. Exact beats city-exact beats a city that starts with it, so "york" does
 // not win over "new york" and a half-typed name still finds something.
-function resolveZone(place, zones) {
+//
+// `exactOnly` drops that last step. A bare word is only a zone when it names
+// one outright -- otherwise every half-typed word would flash up some city
+// that happens to start with it.
+function resolveZone(place, zones, exactOnly) {
   var wanted = String(place || "").trim().toLowerCase().replace(/\s+/g, " ")
   if (!wanted) return ""
 
@@ -1017,7 +1021,70 @@ function resolveZone(place, zones) {
     if (!startsWith && city.indexOf(wanted) === 0) startsWith = zone
   }
 
-  return startsWith
+  return exactOnly ? "" : startsWith
+}
+
+// "14:00 mst in pst", "2pm est to utc", "9:30am tokyo". The time is read in
+// the first place and shown in the second, and either place left out means
+// here: "2pm est" is 2pm Eastern in local time, "14:00 in pst" the other way
+// round. Only a time with a colon or an am/pm counts, so "14 mst" is not one.
+//
+// Returns { hours, minutes, twelveHour, from, to } with the places as typed
+// ("" for here), or null.
+function parseZoneConversion(query) {
+  var text = String(query || "").trim()
+  var match = text.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm|a|p)?(?=\s|$)\s*([\s\S]*)$/i)
+  if (!match || (!match[2] && !match[3])) return null
+
+  var hours = parseInt(match[1], 10)
+  var minutes = match[2] ? parseInt(match[2], 10) : 0
+  var meridiem = (match[3] || "").toLowerCase().charAt(0)
+  if (minutes > 59) return null
+  if (meridiem) {
+    if (hours < 1 || hours > 12) return null
+    hours = hours % 12 + (meridiem === "p" ? 12 : 0)
+  } else if (hours > 23) {
+    return null
+  }
+
+  var rest = match[4].trim()
+  if (!rest) return null
+
+  var from = rest
+  var to = ""
+  var connected = rest.match(/^([\s\S]*?)\s*(?:(?:^|\s)(?:in|to|into|as)\s+|->|=>|→)\s*(\S[\s\S]*)$/i)
+  if (connected) {
+    from = connected[1].trim()
+    to = connected[2].trim()
+  }
+  if (!from && !to) return null
+
+  return { hours: hours, minutes: minutes, twelveHour: !!meridiem, from: from, to: to }
+}
+
+// The same clock face the question was asked in: "13:00" for "14:00 ...",
+// "1pm" for "2pm ...".
+function formatClock(hours, minutes, twelveHour) {
+  if (!twelveHour) return padTwo(hours) + ":" + padTwo(minutes)
+  return (hours % 12 || 12) + (minutes ? ":" + padTwo(minutes) : "") + (hours < 12 ? "am" : "pm")
+}
+
+// A wall-clock time today in one zone, read in another. "Today" is the source
+// zone's today, and `dayShift` says when the answer falls on the day before or
+// after it. Both offsets are the ones in force now, which is right for any
+// day that is not the one the clocks change on.
+function convertZoneTime(parsed, fromOffsetSeconds, toOffsetSeconds, utcMilliseconds) {
+  var today = zoneClock(utcMilliseconds, fromOffsetSeconds)
+  var sourceDay = Date.UTC(today.year, today.month, today.date)
+  var instant = sourceDay + (parsed.hours * 60 + parsed.minutes) * 60000 - fromOffsetSeconds * 1000
+  var there = zoneClock(instant, toOffsetSeconds)
+  var targetDay = Date.UTC(there.year, there.month, there.date)
+
+  return {
+    hours: there.hours,
+    minutes: there.minutes,
+    dayShift: Math.round((targetDay - sourceDay) / 86400000)
+  }
 }
 
 // "+0900" or "-0430" as seconds. Returns null for anything else, so a `date`
@@ -1043,6 +1110,8 @@ function zoneClock(utcMilliseconds, offsetSeconds) {
 
   return {
     time: padTwo(shifted.getUTCHours()) + ":" + padTwo(shifted.getUTCMinutes()),
+    hours: shifted.getUTCHours(),
+    minutes: shifted.getUTCMinutes(),
     weekday: shifted.getUTCDay(),
     date: shifted.getUTCDate(),
     month: shifted.getUTCMonth(),
@@ -1105,6 +1174,9 @@ if (typeof module !== "undefined") {
     epochMilliseconds: epochMilliseconds,
     parseTimeQuery: parseTimeQuery,
     resolveZone: resolveZone,
+    parseZoneConversion: parseZoneConversion,
+    formatClock: formatClock,
+    convertZoneTime: convertZoneTime,
     parseZoneOffset: parseZoneOffset,
     zoneClock: zoneClock,
     zoneWeekdayName: zoneWeekdayName,

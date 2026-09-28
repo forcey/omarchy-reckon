@@ -3,7 +3,8 @@
 A pop-up answer box for Omarchy. Press a hotkey (or click the calculator in the
 bar), type a sum, a conversion or a small question, and the answer appears
 underneath. Enter (or a click) copies it to the clipboard and closes the box;
-Escape clears the query, then closes.
+Escape clears the query, then closes. The empty box suggests a few things to
+try, different each time it opens.
 
 The query is an ordinary text field: move the caret with Left/Right, Home/End
 or Ctrl+Left/Right, select with Shift, click to place it, and edit anywhere in
@@ -19,34 +20,23 @@ menu stays exactly as it is.
 
 ```bash
 omarchy plugin add https://github.com/forcey/omarchy-reckon --enable
-~/.config/omarchy/plugins/forcey.reckon/bind-hotkey
 ```
 
-The first line clones the plugin, enables it, and puts a calculator button on
-the right of the bar. The second binds **Super + Alt + C** to open it. Omarchy
-plugins have no install hook, so the hotkey is this one extra command.
+This clones the plugin, enables it, and puts a calculator button on the right
+of the bar.
 
 ### Hotkey
 
-`bind-hotkey` writes one marked block to `~/.config/hypr/bindings.lua` (after
-backing the file up) and reloads Hyprland. Running it again replaces the block
-rather than adding a second one.
-
-```bash
-cd ~/.config/omarchy/plugins/forcey.reckon
-./bind-hotkey                      # Super + Alt + C
-./bind-hotkey "SUPER + EQUAL"      # any other chord
-./bind-hotkey --force "SUPER + R"  # take a chord that is already bound
-./bind-hotkey --remove             # remove the hotkey
-```
-
-It refuses a chord that is already bound and says what it is bound to; `--force`
-unbinds the old action first. Prefer to do it by hand? Add this to
-`bindings.lua`:
+Add a binding to `~/.config/hypr/bindings.lua` (Hyprland reloads it on save):
 
 ```lua
 o.bind("SUPER + ALT + C", "Reckon", "omarchy-shell shell toggle forcey.reckon")
 ```
+
+`SUPER + ALT + C` is free on a stock Omarchy install. To use a chord that is
+already taken, unbind it first, e.g. `hl.unbind("SUPER + R")` on the line
+above. `omarchy menu keybindings` shows what is bound already, and
+`hyprctl configerrors` will say if the line has a problem.
 
 ### Bar button
 
@@ -66,9 +56,10 @@ omarchy-shell shell summon forcey.reckon '{"query":"100 usd to eur"}'
 
 ```bash
 omarchy plugin update forcey.reckon
-~/.config/omarchy/plugins/forcey.reckon/bind-hotkey --remove
 omarchy plugin remove forcey.reckon
 ```
+
+Remove the `o.bind` line from `bindings.lua` too.
 
 ## Features
 
@@ -146,14 +137,27 @@ Amounts take thousands separators the same way the calculator does
 
 | Type | Get |
 | --- | --- |
-| `time in tokyo` | `18:13` · `Asia/Tokyo · 6 hours ahead` |
-| `now in utc` | `09:13` · `UTC · 3 hours behind` |
-| `time in pst` | `02:13` · `America/Los_Angeles · 10 hours behind` |
+| `utc` | `17:13` · `UTC · 7 hours ahead` |
+| `tokyo` | `02:13 Tue` · `Asia/Tokyo (JST) · 16 hours ahead` |
+| `time in pst` | `10:13` · `America/Los_Angeles (PDT) · same time as here` |
+| `14:00 mst in pst` | `13:00` · `14:00 Denver MDT → Los Angeles PDT` |
+| `2pm est to utc` | `6pm` · `2pm New York EDT → UTC` |
+| `11pm pst to tokyo` | `3pm next day` |
+| `9am london` | `1am` · `9am London BST → local PDT` |
 
 Any city the system knows — the zone list comes from `timedatectl` — plus the
-usual abbreviations (`utc`, `cet`, `est`, `pst`, `ist`, `jst`, `aest`). The day
-is shown alongside the time when it isn't today's.
+usual abbreviations (`utc`, `cet`, `est`, `cst`, `mst`, `pst`, `ist`, `jst`,
+`aest`). A zone typed on its own has to be the whole name (`tokyo`, not `tok`);
+after `time in` or in a conversion, the start of a city name is enough.
 
+A conversion is a time with a colon or an am/pm, a place, and optionally `in`,
+`to` or `->` and a second place. Leave either place out and it means local
+time. Answers come back on the same clock face the question used.
+
+Abbreviations name a region rather than a fixed offset: `est` is New York and
+`mst` is Denver, so in summer they follow daylight saving time. The answer
+shows the abbreviation that was actually applied (`MDT`) so this is never a
+surprise. Conversions use the offsets in force today.
 
 ### Developer utilities
 

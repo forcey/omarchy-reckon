@@ -25,6 +25,7 @@ Item {
     try { payload = JSON.parse(payloadJson || "{}") } catch (e) { payload = ({}) }
 
     if (payload.fontFamily) root.fontFamily = payload.fontFamily
+    root.shuffleHints()
     root.opened = true
     root.setFilter(payload.query ? String(payload.query).slice(0, 512) : "")
     Qt.callLater(function() { queryInput.forceActiveFocus() })
@@ -72,6 +73,28 @@ Item {
   property var timeZones: []
   property var zoneOffsets: ({})
   property real localZoneOffset: 0
+  property string localZoneAbbr: ""
+
+  // What the empty box suggests trying. A different few each time it opens,
+  // so the range of what it answers comes across without a manual.
+  readonly property var hintPool: [
+    "2^10", "(1920*1080)/2", "sqrt(2)*100", "$1,250.50 - $99.99",
+    "172,618.93 - 65,836.94", "5 km to mi", "70 kg to lb", "20 c to f",
+    "1 tb to gib", "2 cup to ml", "60 mph to kmh", "100 usd to eur", "£50 to usd",
+    "time in tokyo", "utc", "pst", "2pm est to utc", "14:00 mst in pst",
+    "9am london", "uuid", "password 24", "sha256 hello", "base64 hello",
+    "epoch", "urlencode a b&c"
+  ]
+  readonly property int hintCount: 4
+  property string hints: ""
+
+  function shuffleHints() {
+    var pool = root.hintPool.slice()
+    var picked = []
+    while (picked.length < root.hintCount && pool.length > 0)
+      picked.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0])
+    root.hints = picked.join(" · ")
+  }
 
   // Bound to the central [menu] section in shell.toml via Color.qml, so the
   // box wears the same theme as the Omarchy menu.
@@ -403,22 +426,30 @@ Item {
     return taken
   }
 
-  // "time in tokyo". Two things have to be fetched before this can answer --
-  // the zone list once, then the zone's offset -- and each one that is missing
-  // shows as a row that says so rather than as nothing at all.
+  // "time in tokyo", or a zone on its own: "utc", "mst", "tokyo". Two things
+  // have to be fetched before this can answer -- the zone list once, then the
+  // zone's offset -- and each one that is missing shows as a row that says so
+  // rather than as nothing at all.
   function timeRow(query) {
+    var conversion = Engine.parseZoneConversion(query)
+    if (conversion) return root.zoneConversionRow(query, conversion)
+
     var place = Engine.parseTimeQuery(query)
-    if (place === null) return null
+    var bare = place === null
+    if (bare) place = query
 
-    if (!root.ensureTimeZones()) return root.timePendingRow(place)
+    var listed = root.ensureTimeZones()
+    // A bare word has to name a zone outright. Until the list is in, only the
+    // abbreviations can, and a word that is not one is not a question.
+    if (!listed && !bare) return root.timePendingRow(place)
 
-    var zone = Engine.resolveZone(place, root.timeZones)
+    var zone = Engine.resolveZone(place, root.timeZones, bare)
     if (!zone) return null
 
     if (!root.ensureZoneOffset(zone)) return root.timePendingRow(place)
 
-    var offset = root.zoneOffsets[zone].offset
-    var there = Engine.zoneClock(Date.now(), offset)
+    var known = root.zoneOffsets[zone]
+    var there = Engine.zoneClock(Date.now(), known.offset)
     var here = Engine.zoneClock(Date.now(), root.localZoneOffset)
     // The day only earns a place on the line when it is not today's.
     var sameDay = there.date === here.date && there.month === here.month && there.year === here.year
@@ -428,8 +459,55 @@ Item {
       kind: "time",
       icon: "󰅐",
       label: sameDay ? there.time : there.time + " " + weekday,
-      detail: zone + " · " + Engine.zoneDifference(offset, root.localZoneOffset),
+      detail: root.zoneLabel(zone) + " · " + Engine.zoneDifference(known.offset, root.localZoneOffset),
       payload: there.time
+    })
+  }
+
+  // "America/Denver (MDT)": the zone the word was taken to mean, and the
+  // abbreviation in force there now, which is what says whether "mst" was
+  // read as summer time.
+  function zoneLabel(zone) {
+    var abbr = zone === "local" ? root.localZoneAbbr : root.zoneOffsets[zone].abbr
+    var name = zone === "local" ? "local" : zone
+    return abbr && abbr !== name ? name + " (" + abbr + ")" : name
+  }
+
+  // "Los Angeles PDT": the short form for a conversion, where two full zone
+  // labels would not fit on one line of the card.
+  function zoneShortLabel(zone) {
+    var abbr = zone === "local" ? root.localZoneAbbr : root.zoneOffsets[zone].abbr
+    var parts = zone.split("/")
+    var name = parts[parts.length - 1].replace(/_/g, " ")
+    return abbr && abbr !== name ? name + " " + abbr : name
+  }
+
+  // "14:00 mst in pst", "2pm est to utc". Either place left out is here.
+  function zoneConversionRow(query, conversion) {
+    var listed = root.ensureTimeZones()
+    var fromZone = conversion.from ? Engine.resolveZone(conversion.from, root.timeZones) : "local"
+    var toZone = conversion.to ? Engine.resolveZone(conversion.to, root.timeZones) : "local"
+    if (!fromZone || !toZone) return listed ? null : root.timePendingRow(query)
+
+    // One at a time: the offset helper runs a single `date` at once, and the
+    // second is asked for when the first lands and rebuilds the row. Every
+    // read also brings back the local offset, so "local" needs none of its own.
+    if (fromZone !== "local" && !root.ensureZoneOffset(fromZone)) return root.timePendingRow(query)
+    if (toZone !== "local" && !root.ensureZoneOffset(toZone)) return root.timePendingRow(query)
+
+    var fromOffset = fromZone === "local" ? root.localZoneOffset : root.zoneOffsets[fromZone].offset
+    var toOffset = toZone === "local" ? root.localZoneOffset : root.zoneOffsets[toZone].offset
+    var result = Engine.convertZoneTime(conversion, fromOffset, toOffset, Date.now())
+    var clock = Engine.formatClock(result.hours, result.minutes, conversion.twelveHour)
+    var asked = Engine.formatClock(conversion.hours, conversion.minutes, conversion.twelveHour)
+    var shift = result.dayShift > 0 ? " next day" : (result.dayShift < 0 ? " day before" : "")
+
+    return root.queryRow({
+      kind: "time",
+      icon: "󰅐",
+      label: clock + shift,
+      detail: asked + " " + root.zoneShortLabel(fromZone) + " → " + root.zoneShortLabel(toZone),
+      payload: clock
     })
   }
 
@@ -460,7 +538,7 @@ Item {
 
     zoneOffsetProc.zone = zone
     zoneOffsetProc.command = root.boundedCommand(
-      "TZ=" + Util.shellQuote(zone) + " date +%z; date +%z", 5, 256)
+      "TZ=" + Util.shellQuote(zone) + " date '+%z %Z'; date '+%z %Z'", 5, 256)
     zoneOffsetProc.running = true
     return false
   }
@@ -639,14 +717,25 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        // Each line is "<offset> <abbreviation>": the zone's, then this
+        // machine's.
         var lines = String(text || "").trim().split("\n")
-        var offset = Engine.parseZoneOffset(lines[0])
-        var local = lines.length > 1 ? Engine.parseZoneOffset(lines[1]) : null
+        var there = String(lines[0] || "").trim().split(/\s+/)
+        var here = String(lines[1] || "").trim().split(/\s+/)
+        var offset = Engine.parseZoneOffset(there[0])
+        var local = Engine.parseZoneOffset(here[0])
         if (offset === null) return
 
-        if (local !== null) root.localZoneOffset = local
+        if (local !== null) {
+          root.localZoneOffset = local
+          root.localZoneAbbr = Engine.sanitizeText(here[1] || "", 16)
+        }
         var next = root.zoneOffsets
-        next[zoneOffsetProc.zone] = { offset: offset, readAt: Math.floor(Date.now() / 1000) }
+        next[zoneOffsetProc.zone] = {
+          offset: offset,
+          abbr: Engine.sanitizeText(there[1] || "", 16),
+          readAt: Math.floor(Date.now() / 1000)
+        }
         root.zoneOffsets = next
         root.refreshAnswer()
       }
@@ -903,9 +992,7 @@ Item {
             anchors.fill: parent
             anchors.leftMargin: root.rowReservedBorderLeft + Style.space(14)
             anchors.rightMargin: root.rowReservedBorderRight + Style.space(14)
-            text: root.filterText.trim()
-              ? "No answer for that"
-              : "2^10 · 5 km to mi · 100 usd to eur · time in tokyo · uuid"
+            text: root.filterText.trim() ? "No answer for that" : root.hints
             color: root.foreground
             opacity: 0.45
             font.family: root.fontFamily
