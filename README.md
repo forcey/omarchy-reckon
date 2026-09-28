@@ -5,6 +5,11 @@ bar), type a sum, a conversion or a small question, and the answer appears
 underneath. Enter (or a click) copies it to the clipboard and closes the box;
 Escape clears the query, then closes.
 
+The query is an ordinary text field: move the caret with Left/Right, Home/End
+or Ctrl+Left/Right, select with Shift, click to place it, and edit anywhere in
+the line. Ctrl+V (or Shift+Insert) pastes at the caret; Ctrl+U clears back to
+the start.
+
 Forked from the answer engine of
 [dzhibas.menu](https://github.com/dzhibas/omarchy.dzhibas.menu), without the
 menu around it: it is its own overlay (`forcey.reckon`), so the stock Omarchy
@@ -74,6 +79,16 @@ omarchy plugin remove forcey.reckon
 | `2+3` | `5` |
 | `sqrt(144)+2^8` | `268` |
 | `(1920*1080)/2` | `1036800` |
+| `172,618.93    -65,836.94` | `106,781.99` |
+| `$127,000 -$40` | `$126,960` |
+| `$10.10 + $0.40` | `$10.50` |
+
+Figures pasted from a statement work as they are. Commas are thousands
+separators, but only in strict groups of three — `1,5` is refused rather than
+guessed at. A currency symbol may lead a number (`$` `€` `£` `¥` `₹` …, and
+`-$40` or `$-40`), as long as the whole expression uses the same one. When the
+input used separators or a symbol, so does the answer, and the answer is what
+Enter copies.
 
 Operators `+ - * / % ^`, parentheses, unary signs, the constants `pi` `tau` `e`,
 and the functions `sqrt cbrt abs round floor ceil exp ln log log2 sin cos tan
@@ -124,9 +139,8 @@ time you actually type a conversion**, so a box never used as a converter
 never touches the network; after that it refreshes about once a day. Offline,
 the row says so rather than showing a stale number without warning.
 
-Commas are not accepted in amounts: `1,000` means one thousand in half of
-Europe and one-point-nought in the other half, and neither reading is worth
-guessing at. Crypto is not supported — the rate source is fiat only.
+Amounts take thousands separators the same way the calculator does
+(`$1,200 to eur`). Crypto is not supported — the rate source is fiat only.
 
 ### Time zones
 

@@ -74,26 +74,54 @@ function mathHas(table, name) {
   return Object.prototype.hasOwnProperty.call(table, name)
 }
 
+// Symbols that may lead a number, the way a statement prints money:
+// "$127,000 -$40", or "$-40" for the same thing.
+var MATH_CURRENCY_PREFIXES = "$€£¥₹₽₴₺₩₪฿₫₱₦"
+
 // Anything the grammar does not name is a tokenize failure rather than a
 // character to skip: a query is only ever an expression if all of it is one.
-// Commas included -- "1,5" is five hundred short of a thousand in half of
-// Europe, so neither reading is worth guessing at.
+//
+// Commas are read as thousands separators, but only in strict groups of three
+// ("172,618.93", "1,000,000"), which is how figures pasted from a US broker or
+// bank look. "1,5" fits no grouping and is refused rather than guessed at.
+//
+// The array comes back carrying two facts about how the numbers were written,
+// so the answer can be written the same way: `grouped` when any of them had
+// separators, and `symbol` when they were money. Mixing symbols -- "$5 + €5"
+// -- is not arithmetic, and is refused.
 function tokenizeMath(text) {
   var src = String(text || "")
     .replace(/×/g, "*")
     .replace(/÷/g, "/")
     .replace(/−/g, "-")
   var tokens = []
+  tokens.grouped = false
+  tokens.symbol = ""
   var i = 0
 
   while (i < src.length) {
     var ch = src.charAt(i)
 
-    if (ch === " " || ch === "\t") { i += 1; continue }
+    // Non-breaking and thin spaces too: web pages put them between a figure
+    // and its sign, and they come along with a copy.
+    if (/[ \t\u00a0\u202f]/.test(ch)) { i += 1; continue }
+
+    if (MATH_CURRENCY_PREFIXES.indexOf(ch) >= 0) {
+      if (!/[0-9.(+-]/.test(src.charAt(i + 1))) return null
+      if (tokens.symbol && tokens.symbol !== ch) return null
+      tokens.symbol = ch
+      i += 1
+      continue
+    }
 
     if (/[0-9.]/.test(ch)) {
       var number = ""
-      while (i < src.length && /[0-9.]/.test(src.charAt(i))) { number += src.charAt(i); i += 1 }
+      while (i < src.length && /[0-9.,]/.test(src.charAt(i))) { number += src.charAt(i); i += 1 }
+      if (number.indexOf(",") >= 0) {
+        if (!/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(number)) return null
+        number = number.replace(/,/g, "")
+        tokens.grouped = true
+      }
       if (/^[eE]/.test(src.charAt(i)) && /[0-9+-]/.test(src.charAt(i + 1))) {
         number += src.charAt(i); i += 1
         if (/[+-]/.test(src.charAt(i))) { number += src.charAt(i); i += 1 }
@@ -245,7 +273,27 @@ function evaluateMath(query) {
   // Division by zero and the like: an answer the row cannot honestly show.
   if (!isFinite(parsed.value)) return ""
 
-  return formatMathResult(parsed.value)
+  var result = formatMathResult(parsed.value)
+  if (tokens.grouped || tokens.symbol) result = groupThousands(result)
+  if (tokens.symbol) result = formatMoney(result, tokens.symbol)
+  return result
+}
+
+// "106781.99" -> "106,781.99". Exponent notation is left as it is: a number
+// that needs one is past where separators help anyone read it.
+function groupThousands(text) {
+  var match = String(text).match(/^(-?)(\d+)(\.\d+)?$/)
+  if (!match) return text
+  return match[1] + match[2].replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (match[3] || "")
+}
+
+// The symbol goes after the sign, as a statement prints it ("-$40"), and cents
+// keep both digits ("$10.50", not "$10.5").
+function formatMoney(text, symbol) {
+  var negative = text.charAt(0) === "-"
+  var digits = negative ? text.slice(1) : text
+  if (/\.\d$/.test(digits)) digits += "0"
+  return (negative ? "-" : "") + symbol + digits
 }
 
 // --- Currency ----------------------------------------------------------------
@@ -1034,6 +1082,8 @@ if (typeof module !== "undefined") {
     tokenizeMath: tokenizeMath,
     formatMathResult: formatMathResult,
     evaluateMath: evaluateMath,
+    groupThousands: groupThousands,
+    formatMoney: formatMoney,
     currencyCodeFor: currencyCodeFor,
     parseCurrencyQuery: parseCurrencyQuery,
     convertCurrency: convertCurrency,

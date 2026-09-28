@@ -27,7 +27,7 @@ Item {
     if (payload.fontFamily) root.fontFamily = payload.fontFamily
     root.opened = true
     root.setFilter(payload.query ? String(payload.query).slice(0, 512) : "")
-    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+    Qt.callLater(function() { queryInput.forceActiveFocus() })
   }
 
   function close() {
@@ -573,9 +573,20 @@ Item {
     currencyRatesProc.running = true
   }
 
+  // The query lives in queryInput, which owns the caret; filterText follows
+  // it. Setting it from here (open, clear) moves the caret to the end.
   function setFilter(nextFilter) {
+    if (queryInput.text !== nextFilter) queryInput.text = nextFilter
+    queryInput.cursorPosition = queryInput.text.length
     root.filterText = nextFilter
     root.refreshAnswer()
+  }
+
+  // A paste lands at the caret, replacing whatever is selected, the way it
+  // would in any other text field.
+  function insertAtCursor(text) {
+    if (queryInput.selectedText) queryInput.remove(queryInput.selectionStart, queryInput.selectionEnd)
+    queryInput.insert(queryInput.cursorPosition, text)
   }
 
   // Read at the moment it is asked for rather than watched in the background:
@@ -650,13 +661,11 @@ Item {
         // The search field is one line, so newlines and tabs come in as
         // spaces, and a clipboard holding half a file cannot become the whole
         // query.
-        var pasted = String(text || "").replace(/\s+/g, " ").trim()
+        var pasted = Engine.sanitizeText(String(text || "").replace(/\s+/g, " ").trim()).trim()
         if (!pasted) return
         if (pasted.length > 512) pasted = pasted.slice(0, 512)
 
-        // Appended, because the caret is always at the end here: "sha256 " and
-        // then a paste is a reasonable way to ask.
-        root.setFilter(root.filterText + pasted)
+        root.insertAtCursor(pasted)
       }
     }
   }
@@ -750,37 +759,6 @@ Item {
 
       MouseArea { anchors.fill: parent; onClicked: {} }
 
-      Item {
-        id: keyCatcher
-        anchors.fill: parent
-        focus: true
-
-        Keys.priority: Keys.BeforeItem
-        Keys.onPressed: function(event) {
-          if (event.key === Qt.Key_Escape) {
-            if (root.filterText) root.setFilter("")
-            else root.cancel()
-            event.accepted = true
-          } else if ((event.key === Qt.Key_V && (event.modifiers & (Qt.ControlModifier | Qt.MetaModifier)))
-                     || (event.key === Qt.Key_Insert && (event.modifiers & Qt.ShiftModifier))) {
-            // Super+V never arrives as Super+V: omarchy binds it to "universal
-            // paste", which sends Ctrl+V on to whatever has focus -- layer
-            // surfaces like this one included.
-            root.pasteIntoFilter()
-            event.accepted = true
-          } else if (Util.editsFilter(event, root.filterText)) {
-            root.setFilter(Util.editedFilter(event, root.filterText))
-            event.accepted = true
-          } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            root.copyAnswer()
-            event.accepted = true
-          } else if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127 && (event.modifiers === Qt.NoModifier || event.modifiers === Qt.ShiftModifier)) {
-            root.setFilter(root.filterText + event.text)
-            event.accepted = true
-          }
-        }
-      }
-
       Column {
         anchors.fill: parent
         anchors.topMargin: card.contentTopInset
@@ -793,17 +771,66 @@ Item {
           width: parent.width
           height: root.headerHeight
 
+          // A real text field, so the caret can move: Left/Right, Home/End,
+          // Ctrl+Left/Right by word, Shift to select, and a click to place it.
+          // Only the keys that mean something to the box as a whole are taken
+          // here; everything else is TextInput's own editing.
+          TextInput {
+            id: queryInput
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            focus: true
+            clip: true
+            maximumLength: 512
+            color: root.foreground
+            selectionColor: root.selectedBackground
+            selectedTextColor: root.selectedText
+            selectByMouse: true
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.heading
+
+            onTextChanged: {
+              if (text === root.filterText) return
+              root.filterText = text
+              root.refreshAnswer()
+            }
+
+            Keys.onPressed: function(event) {
+              if (event.key === Qt.Key_Escape) {
+                if (root.filterText) root.setFilter("")
+                else root.cancel()
+                event.accepted = true
+              } else if ((event.key === Qt.Key_V && (event.modifiers & (Qt.ControlModifier | Qt.MetaModifier)))
+                         || (event.key === Qt.Key_Insert && (event.modifiers & Qt.ShiftModifier))) {
+                // Through wl-paste rather than TextInput's own paste. Super+V
+                // never arrives as Super+V: omarchy binds it to "universal
+                // paste", which sends Ctrl+V on to whatever has focus -- layer
+                // surfaces like this one included.
+                root.pasteIntoFilter()
+                event.accepted = true
+              } else if (event.key === Qt.Key_U && event.modifiers === Qt.ControlModifier) {
+                // Ctrl+U clears to the start of the line, as in a shell.
+                queryInput.remove(0, queryInput.cursorPosition)
+                event.accepted = true
+              } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                root.copyAnswer()
+                event.accepted = true
+              }
+            }
+          }
+
           Text {
             textFormat: Text.PlainText
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            text: Engine.sanitizeText(root.filterText || "Reckon…")
+            visible: !queryInput.text
+            text: "Reckon…"
             color: root.foreground
-            opacity: root.filterText ? 1 : 0.58
+            opacity: 0.58
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
-            elide: Text.ElideLeft
           }
         }
 
