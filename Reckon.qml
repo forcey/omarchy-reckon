@@ -79,7 +79,7 @@ Item {
   // so the range of what it answers comes across without a manual.
   readonly property var hintPool: [
     "2^10", "(1920*1080)/2", "sqrt(2)*100", "$1,250.50 - $99.99",
-    "172,618.93 - 65,836.94", "5 km to mi", "70 kg to lb", "20 c to f",
+    "5 km to mi", "70 kg to lb", "20 c to f",
     "1 tb to gib", "2 cup to ml", "60 mph to kmh", "100 usd to eur", "£50 to usd",
     "time in tokyo", "utc", "pst", "2pm est to utc", "14:00 mst in pst",
     "9am london", "uuid", "password 24", "sha256 hello", "base64 hello",

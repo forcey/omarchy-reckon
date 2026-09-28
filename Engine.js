@@ -75,14 +75,14 @@ function mathHas(table, name) {
 }
 
 // Symbols that may lead a number, the way a statement prints money:
-// "$127,000 -$40", or "$-40" for the same thing.
+// "$1,500 -$40", or "$-40" for the same thing.
 var MATH_CURRENCY_PREFIXES = "$€£¥₹₽₴₺₩₪฿₫₱₦"
 
 // Anything the grammar does not name is a tokenize failure rather than a
 // character to skip: a query is only ever an expression if all of it is one.
 //
 // Commas are read as thousands separators, but only in strict groups of three
-// ("172,618.93", "1,000,000"), which is how figures pasted from a US broker or
+// ("12,345.67", "1,000,000"), which is how figures pasted from a US broker or
 // bank look. "1,5" fits no grouping and is refused rather than guessed at.
 //
 // The array comes back carrying two facts about how the numbers were written,
@@ -279,7 +279,7 @@ function evaluateMath(query) {
   return result
 }
 
-// "106781.99" -> "106,781.99". Exponent notation is left as it is: a number
+// "12345.67" -> "12,345.67". Exponent notation is left as it is: a number
 // that needs one is past where separators help anyone read it.
 function groupThousands(text) {
   var match = String(text).match(/^(-?)(\d+)(\.\d+)?$/)

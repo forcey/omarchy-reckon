@@ -70,8 +70,6 @@ Remove the `o.bind` line from `bindings.lua` too.
 | `2+3` | `5` |
 | `sqrt(144)+2^8` | `268` |
 | `(1920*1080)/2` | `1036800` |
-| `172,618.93    -65,836.94` | `106,781.99` |
-| `$127,000 -$40` | `$126,960` |
 | `$10.10 + $0.40` | `$10.50` |
 
 Figures pasted from a statement work as they are. Commas are thousands
