@@ -71,6 +71,8 @@ Remove the `o.bind` line from `bindings.lua` too.
 | `sqrt(144)+2^8` | `268` |
 | `(1920*1080)/2` | `1036800` |
 | `$10.10 + $0.40` | `$10.50` |
+| `sin(30)` | `0.5` (degrees) and `-0.988031624093` (radians) |
+| `asin(0.5)` | `30` (degrees) and `0.523598775598` (radians) |
 
 Figures pasted from a statement work as they are. Commas are thousands
 separators, but only in strict groups of three — `1,5` is refused rather than
@@ -78,6 +80,12 @@ guessed at. A currency symbol may lead a number (`$` `€` `£` `¥` `₹` …, 
 `-$40` or `$-40`), as long as the whole expression uses the same one. When the
 input used separators or a symbol, so does the answer, and the answer is what
 Enter copies.
+
+Trigonometry answers twice, once with angles in degrees and once in radians,
+each row labelled. Up/Down (or Tab) picks one and Enter copies it; the pick
+sticks while you keep editing. Degrees come first unless the expression
+mentions `pi` or `tau`. A reading with no value — `tan(90)` in degrees — is
+left out.
 
 Operators `+ - * / % ^`, parentheses, unary signs, the constants `pi` `tau` `e`,
 and the functions `sqrt cbrt abs round floor ceil exp ln log log2 sin cos tan

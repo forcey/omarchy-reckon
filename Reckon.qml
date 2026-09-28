@@ -40,9 +40,17 @@ Item {
   property string fontFamily: Style.font.menuFamily
   property bool opened: false
   property string filterText: ""
-  // The one row under the query: what it came to, or null for a query that
-  // is not a question Reckon knows how to answer.
-  property var answer: null
+  // The rows under the query: usually one, two where the question has two
+  // readings (trigonometry, in degrees and in radians), none for a query that
+  // is not a question Reckon knows how to answer. `answer` is the one the
+  // cursor is on, which is what Enter copies.
+  property var answers: []
+  property int selectedIndex: 0
+  // The row last picked with the keyboard or a click. It outlives the rows
+  // themselves, so a pick survives an edit that briefly leaves nothing to
+  // answer -- "sin(30)" to "sin(45)" passes through "sin()".
+  property string pickedId: ""
+  readonly property var answer: root.answers.length > 0 ? root.answers[Math.min(root.selectedIndex, root.answers.length - 1)] : null
   readonly property bool answerReady: !!root.answer && !root.answer.disabled
 
   onOpenedChanged: if (!opened) utilityAnswers = ({})
@@ -113,11 +121,14 @@ Item {
   property int contentMargin: Style.spacing.panelPadding
   property int headerHeight: Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2)
   property int contentSpacing: Style.spacing.md
-  // One row, always the same height whether it holds an answer or the hint,
+  // Each row is the same height whether it holds an answer or the hint, so the
+  // card only changes size when the number of answers does.
   // so the card never jumps while typing.
   property int answerHeight: Math.max(Style.space(58), Style.font.body + Style.font.caption + Style.spacing.rowPaddingX * 2)
   property int cardWidth: Math.min(Style.space(420), panel.width - Style.gapsOut * 2)
-  property int cardHeight: contentMargin * 2 + headerHeight + contentSpacing + answerHeight
+  property int rowSpacing: Style.spacing.xs
+  readonly property int rowCount: Math.max(1, root.answers.length)
+  property int cardHeight: contentMargin * 2 + headerHeight + contentSpacing + answerHeight * rowCount + rowSpacing * (rowCount - 1)
 
   // ------------------------------------------------------------------
   // Reading files off disk.
@@ -194,6 +205,7 @@ Item {
   // and what gets copied are worth writing out each time.
   function queryRow(spec) {
     return Engine.sanitizeRow({
+      id: spec.id || spec.kind,
       // A row still waiting on something it needs cannot be copied yet.
       disabled: spec.ready === false,
       kind: spec.kind,
@@ -207,15 +219,15 @@ Item {
   }
 
   // The questions, in the order they get asked. Each builder takes the query
-  // and returns a row, or null for a query it does not recognise; the first
-  // one that recognises it wins.
+  // and returns a row, a list of rows, or null for a query it does not
+  // recognise; the first one that recognises it wins.
   //
   // Order settles the overlaps. Arithmetic goes first because it is the
   // strictest grammar. Currency goes before units so that "100 cup to eur" is
   // the Cuban peso, while units still take "2 cup to ml" -- currency declines
   // it, since "ml" is not money.
-  function answerFor(query) {
-    if (!query) return null
+  function answersFor(query) {
+    if (!query) return []
 
     var builders = [
       root.calculatorRow,
@@ -230,20 +242,57 @@ Item {
       // that one answer, not the box. Log it and carry on without it.
       try {
         var produced = builders[i](query)
-        if (produced) return produced
+        if (produced) return (produced instanceof Array) ? produced : [produced]
       } catch (e) {
         console.warn("forcey.reckon: answer builder failed:", e)
       }
     }
 
-    return null
+    return []
   }
 
+  // The cursor follows the row that was picked rather than the position:
+  // having picked radians, editing the expression keeps radians picked.
   function refreshAnswer() {
-    root.answer = root.answerFor(root.filterText.trim())
+    var next = root.answersFor(root.filterText.trim())
+    var index = 0
+    for (var i = 0; i < next.length; i++) {
+      if (next[i].id === root.pickedId) index = i
+    }
+    root.answers = next
+    root.selectedIndex = index
   }
 
+  function pickAnswer(index) {
+    if (index < 0 || index >= root.answers.length) return
+    root.selectedIndex = index
+    root.pickedId = root.answers[index].id
+  }
+
+  function selectAnswer(delta) {
+    if (root.answers.length < 2) return
+    root.pickAnswer((root.selectedIndex + delta + root.answers.length) % root.answers.length)
+  }
+
+  // Trigonometry answers twice, since nothing in "sin(30)" says whether the
+  // 30 is degrees or radians -- and "asin(0.5)" has to come back in one or the
+  // other. Degrees lead, unless the expression mentions pi, which is how an
+  // angle in radians gets written.
   function calculatorRow(query) {
+    var angles = Engine.evaluateMathAngles(query)
+    if (angles) {
+      var degrees = angles.degrees ? root.queryRow({
+        id: "calc.degrees", kind: "calc", icon: "󰃬",
+        label: angles.degrees, detail: "Angles in degrees"
+      }) : null
+      var radians = angles.radians ? root.queryRow({
+        id: "calc.radians", kind: "calc", icon: "󰃬",
+        label: angles.radians, detail: "Angles in radians"
+      }) : null
+      var ordered = /\b(pi|tau)\b/i.test(query) ? [radians, degrees] : [degrees, radians]
+      return ordered.filter(function(row) { return !!row })
+    }
+
     var result = Engine.evaluateMath(query)
     if (!result) return null
 
@@ -688,7 +737,9 @@ Item {
   function cancel() {
     opened = false
     filterText = ""
-    answer = null
+    answers = []
+    selectedIndex = 0
+    pickedId = ""
   }
 
   Process {
@@ -902,6 +953,12 @@ Item {
                 // Ctrl+U clears to the start of the line, as in a shell.
                 queryInput.remove(0, queryInput.cursorPosition)
                 event.accepted = true
+              } else if (event.key === Qt.Key_Down || event.key === Qt.Key_Tab) {
+                root.selectAnswer(1)
+                event.accepted = true
+              } else if (event.key === Qt.Key_Up || event.key === Qt.Key_Backtab) {
+                root.selectAnswer(-1)
+                event.accepted = true
               } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                 root.copyAnswer()
                 event.accepted = true
@@ -923,88 +980,110 @@ Item {
           }
         }
 
-        BorderSurface {
-          id: answerRow
-          readonly property bool hasCursor: root.answerReady
-
+        Column {
           width: parent.width
-          height: root.answerHeight
-          radius: root.cornerRadius
-          color: hasCursor ? root.selectedBackground : "transparent"
-          borderSpec: hasCursor ? root.selectedBorderSpec : Border.none()
-          opacity: root.answer && !root.answerReady ? 0.6 : 1
+          spacing: root.rowSpacing
 
-          Text {
-            textFormat: Text.PlainText
-            id: iconText
-            visible: !!root.answer
-            text: root.answer ? root.answer.icon : ""
-            color: answerRow.hasCursor ? root.selectedText : root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.iconLarge
-            width: Style.space(36)
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            anchors.left: parent.left
-            anchors.leftMargin: root.rowReservedBorderLeft + Style.space(8)
-            y: contentColumn.y + labelText.y + (labelText.height - height) / 2
-          }
+          Repeater {
+            model: root.answers
 
-          Column {
-            id: contentColumn
-            visible: !!root.answer
-            anchors.left: iconText.right
-            anchors.leftMargin: Style.space(6)
-            anchors.right: parent.right
-            anchors.rightMargin: root.rowReservedBorderRight + Style.space(14)
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.space(3)
+            delegate: BorderSurface {
+              id: answerRow
+              required property var modelData
+              required property int index
+              readonly property bool ready: !modelData.disabled
+              readonly property bool hasCursor: ready && index === root.selectedIndex
 
-            Text {
-              textFormat: Text.PlainText
-              id: labelText
               width: parent.width
-              text: root.answer ? root.answer.label : ""
-              color: answerRow.hasCursor ? root.selectedText : root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.heading
-              font.weight: Font.Medium
-              elide: Text.ElideRight
-            }
+              height: root.answerHeight
+              radius: root.cornerRadius
+              color: hasCursor ? root.selectedBackground : "transparent"
+              borderSpec: hasCursor ? root.selectedBorderSpec : Border.none()
+              opacity: ready ? 1 : 0.6
 
-            Text {
-              textFormat: Text.PlainText
-              width: parent.width
-              text: root.answer ? root.answer.detail : ""
-              visible: text.length > 0
-              color: answerRow.hasCursor ? root.selectedText : root.foreground
-              opacity: 0.52
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.bodySmall
-              elide: Text.ElideRight
+              Text {
+                textFormat: Text.PlainText
+                id: iconText
+                text: answerRow.modelData.icon
+                color: answerRow.hasCursor ? root.selectedText : root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.iconLarge
+                width: Style.space(36)
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                anchors.left: parent.left
+                anchors.leftMargin: root.rowReservedBorderLeft + Style.space(8)
+                y: contentColumn.y + labelText.y + (labelText.height - height) / 2
+              }
+
+              Column {
+                id: contentColumn
+                anchors.left: iconText.right
+                anchors.leftMargin: Style.space(6)
+                anchors.right: parent.right
+                anchors.rightMargin: root.rowReservedBorderRight + Style.space(14)
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(3)
+
+                Text {
+                  textFormat: Text.PlainText
+                  id: labelText
+                  width: parent.width
+                  text: answerRow.modelData.label
+                  color: answerRow.hasCursor ? root.selectedText : root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.heading
+                  font.weight: Font.Medium
+                  elide: Text.ElideRight
+                }
+
+                Text {
+                  textFormat: Text.PlainText
+                  width: parent.width
+                  text: answerRow.modelData.detail
+                  visible: text.length > 0
+                  color: answerRow.hasCursor ? root.selectedText : root.foreground
+                  opacity: 0.52
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  elide: Text.ElideRight
+                }
+              }
+
+              // No hover selection: the box opens under a still pointer, and the
+              // rows are rebuilt on every keystroke, so hovering would keep taking
+              // the cursor away from the keyboard.
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: answerRow.ready ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onClicked: {
+                  if (!answerRow.ready) return
+                  root.pickAnswer(answerRow.index)
+                  root.copyAnswer()
+                }
+              }
             }
           }
 
           // With nothing to answer, the row says what can be asked instead.
-          Text {
-            textFormat: Text.PlainText
-            visible: !root.answer
-            anchors.fill: parent
-            anchors.leftMargin: root.rowReservedBorderLeft + Style.space(14)
-            anchors.rightMargin: root.rowReservedBorderRight + Style.space(14)
-            text: root.filterText.trim() ? "No answer for that" : root.hints
-            color: root.foreground
-            opacity: 0.45
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
-            verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
-          }
+          Item {
+            visible: root.answers.length === 0
+            width: parent.width
+            height: root.answerHeight
 
-          MouseArea {
-            anchors.fill: parent
-            cursorShape: root.answerReady ? Qt.PointingHandCursor : Qt.ArrowCursor
-            onClicked: root.copyAnswer()
+            Text {
+              textFormat: Text.PlainText
+              anchors.fill: parent
+              anchors.leftMargin: root.rowReservedBorderLeft + Style.space(14)
+              anchors.rightMargin: root.rowReservedBorderRight + Style.space(14)
+              text: root.filterText.trim() ? "No answer for that" : root.hints
+              color: root.foreground
+              opacity: 0.45
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              verticalAlignment: Text.AlignVCenter
+              elide: Text.ElideRight
+            }
           }
         }
       }

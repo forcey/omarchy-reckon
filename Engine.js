@@ -70,6 +70,25 @@ var MATH_FUNCTIONS = {
   atan: function(x) { return Math.atan(x) }
 }
 
+// The functions whose meaning depends on how angles are measured: the first
+// three take an angle, the last three give one back.
+var MATH_ANGLE_FUNCTIONS = { sin: "in", cos: "in", tan: "in", asin: "out", acos: "out", atan: "out" }
+
+// A function applied with angles in degrees or radians. Degrees go through
+// radians, which leaves the noise of pi not being exact: sin(180) would come
+// back as 1.2e-16 and tan(90) as sixteen quadrillion. A result that small is
+// zero, and tan at an odd multiple of 90 has no value at all.
+function applyMathFunction(name, argument, degrees) {
+  var direction = mathHas(MATH_ANGLE_FUNCTIONS, name) ? MATH_ANGLE_FUNCTIONS[name] : ""
+  if (!degrees || !direction) return MATH_FUNCTIONS[name](argument)
+
+  if (direction === "out") return MATH_FUNCTIONS[name](argument) * 180 / Math.PI
+
+  if (name === "tan" && Math.abs(((argument % 180) + 180) % 180 - 90) < 1e-9) return NaN
+  var value = MATH_FUNCTIONS[name](argument * Math.PI / 180)
+  return Math.abs(value) < 1e-12 ? 0 : value
+}
+
 function mathHas(table, name) {
   return Object.prototype.hasOwnProperty.call(table, name)
 }
@@ -151,9 +170,12 @@ function tokenizeMath(text) {
 // answered per keystroke, and a null anywhere means "not arithmetic" and stops
 // the whole thing. `operators` counts the work done, so a bare number stays a
 // search term instead of turning into a result row for itself.
-function parseMathTokens(tokens) {
+// `degrees` measures angles in degrees rather than radians, and `angles` in
+// the result says whether anything in the expression cared which.
+function parseMathTokens(tokens, degrees) {
   var pos = 0
   var operators = 0
+  var angles = false
 
   function peek() { return pos < tokens.length ? tokens[pos] : null }
 
@@ -237,12 +259,13 @@ function parseMathTokens(tokens) {
     var argument = parseExpression()
     if (argument === null || !eat(")")) return null
     operators += 1
-    return MATH_FUNCTIONS[name.value](argument)
+    if (mathHas(MATH_ANGLE_FUNCTIONS, name.value)) angles = true
+    return applyMathFunction(name.value, argument, degrees === true)
   }
 
   var value = parseExpression()
   if (value === null || pos !== tokens.length) return null
-  return { value: value, operators: operators }
+  return { value: value, operators: operators, angles: angles }
 }
 
 // Binary floating point leaves 0.1 + 0.2 at 0.30000000000000004. Twelve
@@ -260,23 +283,44 @@ function formatMathResult(value) {
 // The formatted answer for a query that is entirely an expression, or "" for
 // one that is not -- including a bare number, which is still a search.
 function evaluateMath(query) {
+  var evaluated = evaluateMathIn(query, false)
+  return evaluated ? evaluated.text : ""
+}
+
+// { text, angles } for an expression evaluated with angles in degrees or in
+// radians, or null for a query that is not one. `text` is "" when the
+// expression parses but has no value in that measure -- tan(90) in degrees.
+function evaluateMathIn(query, degrees) {
   var text = String(query || "").trim()
   // Typing the `=` is how a calculator is asked, so let it mean nothing here.
   if (text.charAt(text.length - 1) === "=") text = text.slice(0, -1).trim()
-  if (!text) return ""
+  if (!text) return null
 
   var tokens = tokenizeMath(text)
-  if (!tokens || tokens.length === 0) return ""
+  if (!tokens || tokens.length === 0) return null
 
-  var parsed = parseMathTokens(tokens)
-  if (!parsed || parsed.operators === 0) return ""
+  var parsed = parseMathTokens(tokens, degrees)
+  if (!parsed || parsed.operators === 0) return null
   // Division by zero and the like: an answer the row cannot honestly show.
-  if (!isFinite(parsed.value)) return ""
+  if (!isFinite(parsed.value)) return { text: "", angles: parsed.angles }
 
   var result = formatMathResult(parsed.value)
   if (tokens.grouped || tokens.symbol) result = groupThousands(result)
   if (tokens.symbol) result = formatMoney(result, tokens.symbol)
-  return result
+  return { text: result, angles: parsed.angles }
+}
+
+// Trigonometry has two answers, one per way of measuring angles, and nothing
+// in "sin(30)" says which was meant. Returns { degrees, radians } -- either
+// may be "" -- for an expression that uses angles, or null for one that does
+// not, which has only the one answer evaluateMath gives.
+function evaluateMathAngles(query) {
+  var radians = evaluateMathIn(query, false)
+  if (!radians || !radians.angles) return null
+
+  var degrees = evaluateMathIn(query, true)
+  var result = { degrees: degrees ? degrees.text : "", radians: radians.text }
+  return result.degrees || result.radians ? result : null
 }
 
 // "12345.67" -> "12,345.67". Exponent notation is left as it is: a number
@@ -1151,6 +1195,7 @@ if (typeof module !== "undefined") {
     tokenizeMath: tokenizeMath,
     formatMathResult: formatMathResult,
     evaluateMath: evaluateMath,
+    evaluateMathAngles: evaluateMathAngles,
     groupThousands: groupThousands,
     formatMoney: formatMoney,
     currencyCodeFor: currencyCodeFor,
